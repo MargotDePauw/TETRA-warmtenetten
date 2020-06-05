@@ -34,6 +34,7 @@ param.k0=0.561;
 param.k1=0.45;
 param.k2=0.007;
 param.c_water= 4187; %J/kgK
+param.m_dot_test=0.02*param.A;
 param.beta_collect = 40; 
 % manufacturer data IAMt and IAMl for transversal and longitudinal direction,column=theta_in
 param.IAM.theta_t=[0 10 20 30 40 50 60 70 80 90];
@@ -49,8 +50,8 @@ inPhys.T_in = 20;
 
 
 
-output = ones(n_sim,6);
-output(1,:)= [50 0 0 0 0 0];
+output = ones(n_sim,7);
+output(1,:)= [50 0 0 0 0 0 0];
 
 for i=2:n_sim
 %inPhys
@@ -67,13 +68,13 @@ inHis.T_out= output(i-1,1);
 inHis.t_run= output(i-1,2);
 
 
-if i == 31803
+if i == 2796
     tijdstap=i;
 end
 
-outSolCol=solCol_20200528(inPhys,inHis,param,timestep);
+outSolCol=solCol_20200528(inPhys,inHis,param,timestep,2);
 
-output(i,:) = [outSolCol.T_out outSolCol.t_run  outSolCol.IAM  outSolCol.IAMb outSolCol.Q_dot_con outSolCol.Q_dot_loss];
+output(i,:) = [outSolCol.T_out outSolCol.t_run  outSolCol.IAM  outSolCol.IAMb outSolCol.Q_dot_con outSolCol.Q_dot_loss outSolCol.corr_flow];
 end
 
 

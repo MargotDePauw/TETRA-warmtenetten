@@ -30,6 +30,7 @@
 %           k1(W/m²K)        linear heat loss coeff
 %           k2(W/m²K²)       quadratic heat loss coeff
 %           c(J/kg°C)        specific heat capacity of collector fluid
+%           m_dot_test (kg/s)    flow rate at test
 %           beta_collect (degrees)   angle between collector and horizontal (slope)
 %           IAM              Incidence Angle Modifier data structure of
 %                            beam irradiance. 'l' and 't' are different for
@@ -79,9 +80,11 @@
 % add parameter k0, A
 % inHis: add T_out, T_run
 % diffuse radiation sky and ground as separate inputs
+%add correction for flow rate different from test (so mtest as new
+%parameter)
 
 
-function outVars=solCol_20200318(inPhys,inHis,param,timestep)
+function outVars=solCol_20200318(inPhys,inHis,param,timestep,mode)
 %% assign function inputs
 
 %inPhys
@@ -106,6 +109,7 @@ function outVars=solCol_20200318(inPhys,inHis,param,timestep)
     k1=param.k1;
     k2=param.k2;
     c=param.c_water;
+    m_dot_test=param.m_dot_test;
     azimuth_c=param.azimuth_collect;
     beta = param.beta_collect;
     ro_g=param.ro_g;
@@ -133,7 +137,7 @@ else
         theta_t=90;
     else
         theta_l= abs(beta-atand(tand(zenith_s)*cosd(azimuth_c-azimuth_s)));
-        theta_t= atand((sind(zenith_s)*sind(azimuth_c-azimuth_s))/(cosd(theta)));
+        theta_t= abs(atand((sind(zenith_s)*sind(azimuth_c-azimuth_s))/(cosd(theta))));%abs because of neg angles, is it ok?
     end
 end
     
@@ -148,11 +152,11 @@ theta_t= min(max(theta_t, IAM.theta_t(1)),IAM.theta_t(end));
 %   interpolate
 
 %IAM for beam radiation
-IAMb=interpn(IAM.theta_t,IAM.IAM_t,theta_t)*interpn(IAM.theta_l,IAM.IAM_l,theta_l)
+IAMb=interpn(IAM.theta_t,IAM.IAM_t,theta_t)*interpn(IAM.theta_l,IAM.IAM_l,theta_l);
 %IAM for diffuse radiation
 %equivalent incident angle for diffuse radiation
-theta_sky = 59.68-0.1388*beta+0.001497*beta*beta
-theta_gnd = 90-0.5788*beta+0.002693*beta*beta
+theta_sky = 59.68-0.1388*beta+0.001497*beta*beta;
+theta_gnd = 90-0.5788*beta+0.002693*beta*beta;
 IAMdsky = interpn(IAM.theta_t,IAM.IAM_t,theta_sky)*interpn(IAM.theta_l,IAM.IAM_l,theta_sky);  %is it correct to take product here,?
 IAMdgnd = interpn(IAM.theta_t,IAM.IAM_t,theta_gnd)*interpn(IAM.theta_l,IAM.IAM_l,theta_gnd);  %is it correct to take product here,?
 %global IAM
@@ -164,53 +168,69 @@ else
     IAM=1;
 end
 % 
+%correction for flow rate different from test (only for mode1??)
+f= - m_dot_test*log(1-(k1*A/(m_dot_test*c)));
+corr_flow = (m_dot/m_dot_test)*(1-exp(-f/m_dot))/(1-exp(-f/m_dot_test));
+    
 
-% radiative balance
-
-Q_dot_rad = 999; %temp value       
-
-DT=(T_in+T_out)*0.5-T_amb;  %efficiency (heat losses) is based on T_out from previous timestep
-if I_t >0
-    eff = k0*IAM-k1*DT/I_t-k2*DT*DT/I_t;
-    T_out_new= T_in + eff*I_t*A/(c*m_dot); %constant value in this timestep, cf no capacity
-else
-    T_out_new=T_in + (-k1*DT*A-k2*DT*DT*A)/(c*m_dot); %or Nan??
+if mode ==1
+    DT=(T_in+T_out)*0.5-T_amb;  %efficiency (heat losses) is based on T_out from previous timestep
+    if I_t >0
+        eff = (k0*IAM-k1*DT/I_t-k2*DT*DT/I_t)*corr_flow;
+        T_out_new= T_in + eff*I_t*A/(c*m_dot); %constant value in this timestep, cf no capacity
+    else
+        T_out_new=T_in + (-k1*DT*A-k2*DT*DT*A)*corr_flow/(c*m_dot); %or Nan??
+    end
+    T_out_mean=T_out_new;
+    Q_dot_con=c*m_dot*(T_out_new-T_in);
+    Q_dot_loss_new=(k1*DT+k2*DT*DT)*corr_flow*A;  
 end
-T_out_mean=T_out_new;
-Q_dot_con=c*m_dot*(T_out_new-T_in);
-Q_dot_loss_new=(k1*DT+k2*DT*DT)*A;  
 
-%% dynamics    
+
+
+%% dynamics
 
 % ADJUST IF NECESSARY: DEFINITION OF MEAN TEMEPRATURE
+if mode ==2
+    % test coefficients k0,k1,k2 should be corrected here, as the
+    % differential equation is with F' instead of
+    % FR!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    % radiative balance
+    Q_dot_rad = k0*IAM*A*I_t; 
+    k1_corr = k1*A;
+    k2_corr=k2*A;
+    % make it possible to have T_in being NaN as input if no flow
+    if m_dot<=0 % the model should be able to have T_in as a NaN
+        T_in=0;    % NO PHYSICAL MEANING
+    end
 
-% make it possible to have T_in being NaN as input if no flow
-if m_dot<=0 % the model should be able to have T_in as a NaN
-    T_in=0;    % NO PHYSICAL MEANING
+    DT_0=(T_in+T_out)/2-T_amb;%DT_0=(T_in+T_out_0)/2-T_amb;
+
+    if DT_0>5 % OK to use squared term
+        % define parameters of "diff(DT(t), t) = -a2*DT(t)^2 - a1*DT(t) + a0"
+        a2=k2_corr/C;
+        a1=(k1_corr+2*c*m_dot)/C;
+        a0=(Q_dot_rad-2*c*m_dot*(T_amb-T_in))/C;%+ replaced with -2*c*m_dot enz
+        
+        DT = real((tanh(timestep*sqrt(4*a2*a0 + a1^2)/2 + atanh((2*DT_0*a2 + a1)/sqrt(4*a2*a0 + a1^2)))*sqrt(4*a2*a0 + a1^2) - a1)/(2*a2));
+        
+    else % NOT OK: DT can switch between + and -
+        % define parameters of "diff(DT(t), t) = - a1*DT(t) + a0"
+        % and fit linear curve through sec. order polynomial
+        DT_fit = DT_0; %????????????????????????????????????????????????????????????????,
+        Q_dot_loss_fit=k1_corr*DT_fit+sign(DT_fit)*k2_corr*DT_fit^2;
+        k_=DT_fit/Q_dot_loss_fit;
+        a1_=(k_+2*c*m_dot)/C;
+        a0=(Q_dot_rad-2*c*m_dot*(T_amb-T_in))/C;%+ replaced with -2*c*m_dot enz
+        
+        DT = a0/a1_ + exp(-a1_*timestep)*(DT_0 - a0/a1_);
+        
+    end
+    T_out_new =(DT+T_amb)*2-T_in;
+    T_out_mean=T_out_new;  %NOT CORRECT!!! Toutnew is value at the end of timestep
+    Q_dot_con=c*m_dot*(T_out_new-T_in);
+    Q_dot_loss_new=(k1*DT+k2*DT*DT)*A; 
 end
-
-DT_0=(T_in+T_out)/2-T_amb;%DT_0=(T_in+T_out_0)/2-T_amb;
-
-% if DT_0>5 % OK to use squared term
-%     % define parameters of "diff(DT(t), t) = -a2*DT(t)^2 - a1*DT(t) + a0"
-%     a2=k2/C;
-%     a1=(k1+2*c*m_dot)/C;
-%     a0=(Q_dot_rad+2*c*m_dot*(T_amb-T_in))/C;
-%     
-%     DT = (tanh(timestep*sqrt(4*a2*a0 + a1^2)/2 + arctanh((2*DT_0*a2 + a1)/sqrt(4*a2*a0 + a1^2)))*sqrt(4*a2*a0 + a1^2) - a1)/(2*a2);
-%     
-% else % NOT OK: DT can switch between + and -
-%     % define parameters of "diff(DT(t), t) = - a1*DT(t) + a0"
-%     % and fit linear curve through sec. order polynomial
-%     Q_dot_loss_fit=k1*DT_fit+sign(DT_fit)*k2*DT_fit^2;
-%     k_=DT_fit/Q_dot_loss_fit;
-%     a1_=(k_+2*c*m_dot)/C;
-%     a0=(Q_dot_rad+2*c*m_dot*(T_amb-T_in))/C;
-%     
-%     DT = a0/a1_ + exp(-a1_*timestep)*(DT_0 - a0/a1_);
-%     
-% end
-
 %% calculate other outputs and assign outputs to output structure
 
 
@@ -237,6 +257,7 @@ outVars.t_run=t_run_new;
 outVars.Q_dot_con=Q_dot_con;
 outVars.IAM=IAM;
 outVars.IAMb=IAMb;
+outVars.corr_flow=corr_flow;
 %outVars.A_dot=A_dot;
 
 end

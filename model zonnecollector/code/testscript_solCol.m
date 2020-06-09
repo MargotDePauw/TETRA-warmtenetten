@@ -45,13 +45,13 @@ param.azimuth_collect=0;
 param.ro_g= 0.2; %??
 
 %input data
-inPhys.m_dot = 0.02*param.A;   %kg/s
+%inPhys.m_dot = 0.02*param.A;   %kg/s
 inPhys.T_in = 20;
 
 
 
 output = ones(n_sim,7);
-output(1,:)= [50 0 0 0 0 0 0];
+output(1,:)= [50 0 0 0 0 0 0 ];
 
 for i=2:n_sim
 %inPhys
@@ -65,16 +65,24 @@ inPhys.zenith_sol=Sol_Zenith(i);
 inPhys.theta=AI(i);
 
 inHis.T_out= output(i-1,1);
-inHis.t_run= output(i-1,2);
+m_dot_prev = output(i-1,7);
 
-
+if inHis.T_out > 25
+    inPhys.m_dot = 0.02*param.A;   %kg/s
+else
+    if inHis.T_out<=22
+        inPhys.m_dot = 0;   %kg/s
+    else
+        inPhys.m_dot=m_dot_prev;
+    end
+end
 if i == 2796
     tijdstap=i;
 end
 
-outSolCol=solCol_20200528(inPhys,inHis,param,timestep,2);
+outSolCol=solCol_20200528(inPhys,inHis,param,timestep);
 
-output(i,:) = [outSolCol.T_out outSolCol.t_run  outSolCol.IAM  outSolCol.IAMb outSolCol.Q_dot_con outSolCol.Q_dot_loss outSolCol.corr_flow];
+output(i,:) = [outSolCol.T_out outSolCol.IAM  outSolCol.IAMb outSolCol.Q_dot outSolCol.Q_dot_loss outSolCol.corr_flow outSolCol.m_dot];
 end
 
 

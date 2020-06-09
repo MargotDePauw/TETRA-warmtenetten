@@ -21,7 +21,7 @@
 %                 solving differential equations)
 %           T_m(°C)       mean temp. at outlet of previous timestep ((T_in+T_out)/2)
 %           T_out(°C)       outlet temp at previous timestep
-%           t_run (s)
+%           
 %
 %   'param': parameters
 %           C(J/°C)          overall thermal capacity (i.e. capacitance)
@@ -64,7 +64,6 @@
 %                           checks and within this function it is used for
 %                           heat loss calculations (Q_dot_loss)
 %           Q_dot_loss(W)   mean heat flux to surroundings
-%           t_run (s)       new calculated run/off time
 %
 % freek.vanriet@uantwerpen.be; 19/03/2020
 % based on boiler_tempControl_20170926
@@ -84,7 +83,7 @@
 %parameter)
 
 
-function outVars=solCol_20200318(inPhys,inHis,param,timestep,mode)
+function outVars=solCol_20200318(inPhys,inHis,param,timestep)
 %% assign function inputs
 
 %inPhys
@@ -100,7 +99,7 @@ function outVars=solCol_20200318(inPhys,inHis,param,timestep,mode)
     
 %inHist
     T_out=inHis.T_out;
-    t_run=inHis.t_run;
+   
     
 %param
     C=param.C;
@@ -168,21 +167,27 @@ else
     IAM=1;
 end
 % 
-%correction for flow rate different from test (only for mode1??)
-f= - m_dot_test*log(1-(k1*A/(m_dot_test*c)));
-corr_flow = (m_dot/m_dot_test)*(1-exp(-f/m_dot))/(1-exp(-f/m_dot_test));
+
     
 
-if mode ==1
+if C == 0  %steady state model
+    if m_dot == 0
+        m_dot_temp = m_dot_test; %enables calculation of T_out as control value
+    else
+        m_dot_temp=m_dot;
+    end
+    %correction for flow rate different from test (only for steady state calculation)
+    f= - m_dot_test*log(1-(k1*A/(m_dot_test*c)));
+    corr_flow = (m_dot_temp/m_dot_test)*(1-exp(-f/m_dot_temp))/(1-exp(-f/m_dot_test));
     DT=(T_in+T_out)*0.5-T_amb;  %efficiency (heat losses) is based on T_out from previous timestep
     if I_t >0
         eff = (k0*IAM-k1*DT/I_t-k2*DT*DT/I_t)*corr_flow;
-        T_out_new= T_in + eff*I_t*A/(c*m_dot); %constant value in this timestep, cf no capacity
+        T_out_new= T_in + eff*I_t*A/(c*m_dot_temp); %constant value in this timestep, cf no capacity
     else
-        T_out_new=T_in + (-k1*DT*A-k2*DT*DT*A)*corr_flow/(c*m_dot); %or Nan??
+        T_out_new=T_in + (-k1*DT*A-k2*DT*DT*A)*corr_flow/(c*m_dot_temp); %or Nan??
     end
     T_out_mean=T_out_new;
-    Q_dot_con=c*m_dot*(T_out_new-T_in);
+    Q_dot=c*m_dot*(T_out_new-T_in);
     Q_dot_loss_new=(k1*DT+k2*DT*DT)*corr_flow*A;  
 end
 
@@ -191,7 +196,7 @@ end
 %% dynamics
 
 % ADJUST IF NECESSARY: DEFINITION OF MEAN TEMEPRATURE
-if mode ==2
+if C > 0  %model with collector capacitance
     % test coefficients k0,k1,k2 should be corrected here, as the
     % differential equation is with F' instead of
     % FR!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -212,12 +217,12 @@ if mode ==2
         a1=(k1_corr+2*c*m_dot)/C;
         a0=(Q_dot_rad-2*c*m_dot*(T_amb-T_in))/C;%+ replaced with -2*c*m_dot enz
         
-        DT = real((tanh(timestep*sqrt(4*a2*a0 + a1^2)/2 + atanh((2*DT_0*a2 + a1)/sqrt(4*a2*a0 + a1^2)))*sqrt(4*a2*a0 + a1^2) - a1)/(2*a2));
+        DT = real((tanh(timestep*sqrt(4*a2*a0 + a1^2)/2 + atanh((2*DT_0*a2 + a1)/sqrt(4*a2*a0 + a1^2)))*sqrt(4*a2*a0 + a1^2) - a1)/(2*a2)); %real, because result of atanh has complex NOTATION
         
     else % NOT OK: DT can switch between + and -
         % define parameters of "diff(DT(t), t) = - a1*DT(t) + a0"
         % and fit linear curve through sec. order polynomial
-        DT_fit = DT_0; %????????????????????????????????????????????????????????????????,
+        DT_fit = DT_0; %????????, is DT_0 ok as value for DT_fit
         Q_dot_loss_fit=k1_corr*DT_fit+sign(DT_fit)*k2_corr*DT_fit^2;
         k_=DT_fit/Q_dot_loss_fit;
         a1_=(k_+2*c*m_dot)/C;
@@ -227,37 +232,23 @@ if mode ==2
         
     end
     T_out_new =(DT+T_amb)*2-T_in;
-    T_out_mean=T_out_new;  %NOT CORRECT!!! Toutnew is value at the end of timestep
-    Q_dot_con=c*m_dot*(T_out_new-T_in);
-    Q_dot_loss_new=(k1*DT+k2*DT*DT)*A; 
+    T_out_mean=(T_out + T_out_new)*0.5;  %NOT 100% CORRECT!!! (T_out is not lineair function in time)
+    Q_dot=c*m_dot*(T_out_mean-T_in);
+    DT_mean = (T_in+T_out_mean)/2-T_amb;
+    Q_dot_loss_new=(k1*DT_mean+k2*DT_mean*DT_mean)*A; 
+    corr_flow=1; % no correction needed here
 end
 %% calculate other outputs and assign outputs to output structure
 
-
-% time running or off 
-if Q_dot_con==0 % HP is off
-    if t_run<0 % HP was off
-        t_run_new=t_run-timestep; % is off for a longer time
-    else % HP was on
-        t_run_new=-timestep; %is off since one timestep
-    end
-else % HP is on
-    if t_run<0 %  was off
-        t_run_new=timestep; % is on since one timestep
-    else %  was on
-        t_run_new=t_run+timestep; % is on for a longer time
-    end
-end
 
 % assign outputs
 outVars.T_out=T_out_new;
 outVars.T_out_mean=T_out_mean;
 outVars.Q_dot_loss=Q_dot_loss_new;%in W
-outVars.t_run=t_run_new;
-outVars.Q_dot_con=Q_dot_con;
+outVars.Q_dot=Q_dot;
 outVars.IAM=IAM;
 outVars.IAMb=IAMb;
 outVars.corr_flow=corr_flow;
-%outVars.A_dot=A_dot;
+outVars.m_dot=m_dot;
 
 end

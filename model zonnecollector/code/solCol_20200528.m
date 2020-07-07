@@ -188,7 +188,9 @@ if C == 0  %steady state model
     end
     T_out_mean=T_out_new;
     Q_dot=c*m_dot*(T_out_new-T_in);
+    %DT=(T_in + T_out_mean)*0.5-T_amb;  %new DT with new Tout
     Q_dot_loss_new=(k1*DT+k2*DT*DT)*corr_flow*A;  
+    Q_dot_rad = k0*IAM*A*I_t;
 end
 
 
@@ -222,20 +224,32 @@ if C > 0  %model with collector capacitance
     else % NOT OK: DT can switch between + and -
         % define parameters of "diff(DT(t), t) = - a1*DT(t) + a0"
         % and fit linear curve through sec. order polynomial
-        DT_fit = DT_0; %????????, is DT_0 ok as value for DT_fit
+        DT_fit = DT_0+0.000001; %????????, is DT_0 ok as value for DT_fit (0.00001 otherwise Nan is DT_0=0)
         Q_dot_loss_fit=k1_corr*DT_fit+sign(DT_fit)*k2_corr*DT_fit^2;
-        k_=DT_fit/Q_dot_loss_fit;
+        k_=Q_dot_loss_fit/DT_fit;%was DT_fit/Q_dot_loss_fit; ????????????????????????????????????????????????????????????????????????
         a1_=(k_+2*c*m_dot)/C;
         a0=(Q_dot_rad-2*c*m_dot*(T_amb-T_in))/C;%+ replaced with -2*c*m_dot enz
         
         DT = a0/a1_ + exp(-a1_*timestep)*(DT_0 - a0/a1_);
-        
+       % a1=a1_; %for calculation T_out_mean
     end
     T_out_new =(DT+T_amb)*2-T_in;
-    T_out_mean=(T_out + T_out_new)*0.5;  %NOT 100% CORRECT!!! (T_out is not lineair function in time)
+    %T_out_mean= (T_out + T_out_new)*0.5;  %NOT 100% CORRECT!!! (T_out is not lineair function in time)
+    %approximation by exponential curve instead of lineair, 
+    %exponential curve is solution of diff (DT,t)= -b1DT +b0 (same lineair approx as for DT_0<5)
+    b0=a0;
+    b1= ((k1_corr*DT_0+sign(DT_0)*k2_corr*DT_0^2)/(DT_0+0.0000001)+2*c*m_dot)/C;
+    %T_out_mean = (b0*timestep-T_out_new+T_out)/(b1*timestep); %approximation by exponential curve instead of linair
+    DT_mean = (b0*timestep-DT+DT_0)/(b1*timestep);
+    T_out_mean=(DT_mean+T_amb)*2-T_in;
+    
     Q_dot=c*m_dot*(T_out_mean-T_in);
-    DT_mean = (T_in+T_out_mean)/2-T_amb;
-    Q_dot_loss_new=(k1*DT_mean+k2*DT_mean*DT_mean)*A; 
+    %DT_mean = (T_in+T_out_mean)/2-T_amb;
+    if DT_0>5
+        Q_dot_loss_new=(k1*DT_mean+k2*DT_mean*abs(DT_mean))*A; 
+    else
+       Q_dot_loss_new =k_*DT_mean;
+    end
     corr_flow=1; % no correction needed here
 end
 %% calculate other outputs and assign outputs to output structure
@@ -246,9 +260,11 @@ outVars.T_out=T_out_new;
 outVars.T_out_mean=T_out_mean;
 outVars.Q_dot_loss=Q_dot_loss_new;%in W
 outVars.Q_dot=Q_dot;
+outVars.Q_dot_rad=Q_dot_rad;
 outVars.IAM=IAM;
 outVars.IAMb=IAMb;
 outVars.corr_flow=corr_flow;
 outVars.m_dot=m_dot;
-
+outVars.Tcoll=DT+T_amb; % collector temp (for energy balance)
+outVars.DT_0=DT_0; %for testing of energy balance, difference in case of lineair and kwadratic losses
 end

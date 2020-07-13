@@ -159,7 +159,7 @@ E_stor_net_instant=diff(E_stor_tot);
 
 %% reference
 E_ref_instant=inRef.P*timestep;
-E_ref_tot=n_sim*E_ref_instant;
+E_ref_tot=sum(E_ref_instant);%was n_sim*E_ref_instant (MDP)
 
 %% balances
 
@@ -184,7 +184,7 @@ eRelRef=abs(E_net/E_ref_tot);
 eRelHeatSource_instant=abs(E_net_instant./E_heatSource_instant(2:end));
 eRelHyd_instant=abs(E_net_instant./(E_hyd_in_instant(2:end)-E_hyd_out_instant(2:end)));
 eRelInOut=abs(E_net_instant./E_InOut_net_instant(2:end));
-eRelRef_instant=abs(E_net_instant/E_ref_instant);
+eRelRef_instant=abs(E_net_instant./E_ref_instant(2:end));%E_ref_instant(2:end) instead of E_ref_instant (MDP) and ./ instead of /
 
 %% make summary
 % outVars.summary ---- most important outputs, only these should be saved
@@ -192,10 +192,10 @@ outMean=mean(eRelRef_instant);
 outMedian=median(eRelRef_instant);
 outMin=min(eRelRef_instant);
 outMax=max(eRelRef_instant);
-p10=prctile(eRelRef_instant,10);
-p25=prctile(eRelRef_instant,25);
-p75=prctile(eRelRef_instant,75);
-p90=prctile(eRelRef_instant,90);
+% p10=prctile(eRelRef_instant,10);
+% p25=prctile(eRelRef_instant,25);
+% p75=prctile(eRelRef_instant,75);
+% p90=prctile(eRelRef_instant,90);
 
 %% assign outputs
 % total
@@ -243,10 +243,10 @@ outVars.summary.mean=outMean;
 outVars.summary.median=outMedian;
 outVars.summary.min=outMin;
 outVars.summary.max=outMax;
-outVars.summary.p10=p10;
-outVars.summary.p25=p25;
-outVars.summary.p75=p75;
-outVars.summary.p90=p90;
+% outVars.summary.p10=p10;
+% outVars.summary.p25=p25;
+% outVars.summary.p75=p75;
+% outVars.summary.p90=p90;
 outVars.summary.eRelRef_instant=eRelRef_instant;
 outVars.summary.eRelRef=eRelRef;
 outVars.summary.eRelHeatSource=eRelHeatSource;
